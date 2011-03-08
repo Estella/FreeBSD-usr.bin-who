@@ -47,6 +47,8 @@ __FBSDID("$FreeBSD: src/usr.bin/who/who.c,v 1.22.14.1 2010/12/21 17:10:29 kensmi
 #include <unistd.h>
 #include <utmp.h>
 
+#include <GeoIP.h>
+
 static void	heading(void);
 static void	process_utmp(FILE *);
 static void	quick(FILE *);
@@ -61,6 +63,9 @@ static int	qflag;			/* "Quick" mode */
 static int	sflag;			/* Show name, line, time */
 static int	Tflag;			/* Show terminal state */
 static int	uflag;			/* Show idle time */
+
+#define W_DISPGEOSIZE 20
+const char* geoiplookup(const char*);
 
 int
 main(int argc, char *argv[])
@@ -153,6 +158,7 @@ heading(void)
 	printf("%-*s ", 12, "TIME");
 	if (uflag)
 		printf("IDLE  ");
+	printf("%-*s", W_DISPGEOSIZE, "GEO");
 	printf("%-*s", UT_HOSTSIZE, "FROM");
 	putchar('\n');
 }
@@ -199,8 +205,16 @@ row(struct utmp *ut)
 		else
 			printf(" old  ");
 	}
-	if (*ut->ut_host != '\0')
+	if (*ut->ut_host != '\0') {
+		char host_buf[UT_HOSTSIZE + 1];
+		const char *country_name = NULL;
+		host_buf[UT_HOSTSIZE] = '\0';
+		strncpy(host_buf, ut->ut_host, UT_HOSTSIZE);
+		country_name = geoiplookup(host_buf);
+
+		printf("%-*.*s", W_DISPGEOSIZE, W_DISPGEOSIZE, country_name ? country_name : "-");
 		printf("(%.*s)", UT_HOSTSIZE, ut->ut_host);
+	}
 	putchar('\n');
 }
 
@@ -287,6 +301,24 @@ whoami(FILE *fp)
 	strncpy(ut.ut_line, tty, UT_LINESIZE);
 	ut.ut_time = _time_to_time32(time(NULL));
 	row(&ut);
+}
+
+const char* geoiplookup(const char *name) {
+	const char *country_name = NULL;
+
+	int gip_type = strchr(name, ':') ? GEOIP_COUNTRY_EDITION_V6 : GEOIP_COUNTRY_EDITION;
+	if (GeoIP_db_avail(gip_type)) {
+		GeoIP *gip = GeoIP_open_type(gip_type, GEOIP_STANDARD);
+
+		if (gip) {
+			int country_id = gip_type == GEOIP_COUNTRY_EDITION ? GeoIP_id_by_name(gip, name) : GeoIP_id_by_name_v6(gip, name);
+			if (country_id > 0)
+				country_name = GeoIP_country_name[country_id];
+			GeoIP_delete(gip);
+		}
+	}
+
+	return country_name;
 }
 
 static int
