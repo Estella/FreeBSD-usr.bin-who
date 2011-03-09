@@ -66,6 +66,7 @@ static int	uflag;			/* Show idle time */
 
 #define W_DISPGEOSIZE 20
 const char* geoiplookup(const char*);
+int should_show_user(const char*);
 
 int
 main(int argc, char *argv[])
@@ -239,6 +240,8 @@ process_utmp(FILE *fp)
 	while (fread(&ut, sizeof(ut), 1, fp) == 1) {
 		if (*ut.ut_name == '\0')
 			continue;
+		if (!should_show_user(ut.ut_name))
+			continue;
 		if (ttystat(ut.ut_line, UT_LINESIZE) != 0)
 			continue;
 		row(&ut);
@@ -255,6 +258,8 @@ quick(FILE *fp)
 	col = num = 0;
 	while (fread(&ut, sizeof(ut), 1, fp) == 1) { 
 		if (*ut.ut_name == '\0')
+			continue;
+		if (!should_show_user(ut.ut_name))
 			continue;
 		printf("%-*.*s", UT_NAMESIZE, UT_NAMESIZE, ut.ut_name);
 		if (++col < ncols / (UT_NAMESIZE + 1))
@@ -284,12 +289,15 @@ whoami(FILE *fp)
 		tty = p + 1;
 
 	/* Search utmp for our tty, dump first matching record. */
-	while (fread(&ut, sizeof(ut), 1, fp) == 1)
+	while (fread(&ut, sizeof(ut), 1, fp) == 1) {
+		if (!should_show_user(ut.ut_name))
+			continue;
 		if (*ut.ut_name != '\0' && strncmp(ut.ut_line, tty,
 		    UT_LINESIZE) == 0) {
 			row(&ut);
 			return;
 		}
+	}
 
 	/* Not found; fill the utmp structure with the information we have. */
 	memset(&ut, 0, sizeof(ut));
@@ -301,6 +309,22 @@ whoami(FILE *fp)
 	strncpy(ut.ut_line, tty, UT_LINESIZE);
 	ut.ut_time = _time_to_time32(time(NULL));
 	row(&ut);
+}
+
+int should_show_user(const char *name) {
+	static struct passwd *pw = NULL;
+	if (name == NULL)
+		return 0;
+
+	if (geteuid() == 0)
+		return 1;
+
+	if (pw == NULL)
+		pw = getpwuid(getuid());
+
+	if (!strncmp(name, pw->pw_name, UT_NAMESIZE))
+		return 1;
+	return 0;
 }
 
 const char* geoiplookup(const char *name) {
